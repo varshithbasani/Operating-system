@@ -6,6 +6,8 @@ from prettytable import PrettyTable
 
 class FileSystem:
     def __init__(self,db_name=None):
+        self.history = []
+
         if not db_name:
             self.db_name = "filesystem.sqlite"
         else:
@@ -89,7 +91,7 @@ class FileSystem:
         headers = [desc[0] for desc in self.crud.cursor.description]
         for i in range(len(headers)):
             if headers[i] == "size":
-                headers[i] += " (KB)"
+                headers[i] += " "
         table.field_names = headers
         table.add_rows(results)
         return table
@@ -153,7 +155,7 @@ class FileSystem:
         query = f"SELECT name, owner, created_date, size, type FROM files_data WHERE pid = ? AND name NOT LIKE '.%'; "
         if flag:
             if "l" in flag:
-                query = f"SELECT id, pid, name, created_date, modified_date, size, type, owner, groop, permissions FROM files_data WHERE pid = ?"
+                query = f"SELECT  name, created_date, modified_date, size, type, owner, groop, permissions FROM files_data WHERE pid = ?"
             elif "a" in flag:
                 query = query.replace(" AND name NOT LIKE '.%'", "")
         if path:
@@ -261,6 +263,14 @@ class FileSystem:
             print(f"Current directory changed to '{self.cwd}'.")
         except Exception as e:
             print(f"error: {e}")
+
+    def get_history(self):
+        """Get the history of commands that have been executed."""
+        history_str = ""
+        for command in self.history:
+            history_str += command + "\n"
+        return history_str
+    
         
     def mkdir(self,**kwargs):
         """
@@ -391,18 +401,26 @@ class FileSystem:
                 return "Invalid source or destination."
             source_id = self.__getPathId(path=source)
             destination_id = self.__getPathId(path=destination)
-            if source_id is not None and destination_id is not None:
-                # Check if the destination is a folder
-                query = f"SELECT type FROM files_data WHERE id = ?;"
-                self.crud.cursor.execute(query, (destination_id,))
-                result = self.crud.cursor.fetchone()
+            if source_id is not None:
+                if destination_id is None:
+                    new_file_name = destination.split('/')[-1]
+                    if new_file_name == destination:
+                        return "Invalid destination."
+                    destination_id = self.__getPathId(path=destination.replace(f"/{new_file_name}", ''))
+                    result = ['file']
+                else:
+                    # Check if the destination is a folder
+                    query = f"SELECT type FROM files_data WHERE id = ?;"
+                    self.crud.cursor.execute(query, (destination_id,))
+                    result = self.crud.cursor.fetchone()
                 if result:
                     destination_type = result[0]
+                    # get the source data
+                    query = f"SELECT * FROM files_data WHERE id = ?;"
+                    self.crud.cursor.execute(query, (source_id,))
+                    result = self.crud.cursor.fetchone()
+
                     if destination_type == 'folder':
-                        # get the source data
-                        query = f"SELECT * FROM files_data WHERE id = ?;"
-                        self.crud.cursor.execute(query, (source_id,))
-                        result = self.crud.cursor.fetchone()
 
                         if result:
                             # Insert file or folder into the destination
@@ -437,8 +455,16 @@ class FileSystem:
                                 return f"File or folder '{source}' copied to '{destination}'."
                         else:
                             return f"Destination '{destination}' is not a folder."
-                else:
-                    return f"Destination '{destination}' not found."
+                    else:
+                        if result:
+                            # insert the data
+                            query = f"INSERT INTO files_data (pid, name, created_date, modified_date, size, type, owner, groop, permissions) VALUES (?, ?, datetime('now'), datetime('now'), ?, ?, ?, ?, ?);"
+                            self.crud.cursor.execute(query, (destination_id, new_file_name, result[5], result[6], result[7], result[8], result[9]))
+                            return f"File or folder '{source}' copied to '{destination}'."
+                            # return f"Destination '{destination}' not found."
+                        else:
+                            return f"File or folder '{source}' not found."
+                            
             else:
                 return f"File or folder not found. Please check the inputs and try again."
         except Exception as e:
@@ -460,15 +486,14 @@ if __name__ == "__main__":
         (1, 0, 'Folder1', '2023-09-25 10:00:00', '2023-09-25 10:00:00', 20.0, 'folder', 'user1', 'group1', 'rwxr-xr-x', None),
         (2, 1, 'File1.txt', '2023-09-25 10:15:00', '2023-09-25 10:15:00', 1024.5, 'file', 'user1', 'group1', 'rw-r--r--', 'This is the content of File1.txt'),
         (3, 1, 'File2.txt', '2023-09-25 10:30:00', '2023-09-25 10:30:00', 512.0, 'file', 'user2', 'group2', 'rw-rw-r--', 'This is the content of File2.txt'),
-        (4, 0, 'Folder2', '2023-09-25 11:00:00', '2023-09-25 11:00:00', 0.0, 'folder', 'user2', 'group2', 'rwxr-xr--', None),
+        (4, 0, 'Folder2', '2023-09-25 11:00:00', '2023-09-25 11:00:00', 40.0, 'folder', 'user2', 'group2', 'rwxr-xr--', None),
         (5, 4, 'File3.txt', '2023-09-25 11:15:00', '2023-09-25 11:15:00', 2048.75, 'file', 'user3', 'group3', 'rw-r--r--', 'This is the content of File3.txt'),
         (6, 4, 'File4.txt', '2023-09-25 11:30:00', '2023-09-25 11:30:00', 4096.0, 'file', 'user3', 'group3', 'rw-r--r--', 'This is the content of File4.txt'),
-        (7, 0, 'Folder3', '2023-09-25 12:00:00', '2023-09-25 12:00:00', 0.0, 'folder', 'user4', 'group4', 'rwxr-x---', None),
+        (7, 0, 'Folder3', '2023-09-25 12:00:00', '2023-09-25 12:00:00', 36.0, 'folder', 'user4', 'group4', 'rwxr-x---', None),
         (8, 7, 'File5.txt', '2023-09-25 12:15:00', '2023-09-25 12:15:00', 8192.0, 'file', 'user4', 'group4', 'rw-------', 'This is the content of File5.txt'),
-        (9, 0, 'Folder4', '2023-09-25 13:00:00', '2023-09-25 13:00:00', 0.0, 'folder', 'user5', 'group5', 'rwxr-xr-x', None),
+        (9, 0, 'Folder4', '2023-09-25 13:00:00', '2023-09-25 13:00:00', 86.0, 'folder', 'user5', 'group5', 'rwxr-xr-x', None),
         (10, 9, 'File6.txt', '2023-09-25 13:15:00', '2023-09-25 13:15:00', 3072.25, 'file', 'user5', 'group5', 'rwxr-xr--', 'This is the content of File6.txt'),
-        (11, 0, '.new.txt', '2023-09-25 13:15:00', '2023-09-25 13:15:00', 3072.25, 'file', 'user5', 'group5', 'rwxr-xr--', 'This is the content of File6.txt'),
-
+        (11, 0, '.hidden.txt', '2023-09-25 13:15:00', '2023-09-25 13:15:00', 30.25, 'file', 'user5', 'group5', 'rwxr-xr--', 'This is the content of hidden.txt'),
     ]
 
     conn = SQLiteCrud("filesystem.sqlite")
@@ -480,5 +505,7 @@ if __name__ == "__main__":
 
     for row in test_data:
         conn.insert_data(table_name, row)
-    conn.conn.commit()
+
     print(conn.formatted_print(table_name))
+    conn.conn.commit()
+    
